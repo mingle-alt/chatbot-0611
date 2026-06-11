@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import streamlit as st
 import folium
@@ -7,7 +8,7 @@ from audio_recorder_streamlit import audio_recorder
 from chat import get_client, trim_history, stream_response, transcribe_audio, extract_places, geocode_places
 from config import (
     AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_TEMPERATURE,
-    DEFAULT_MAX_HISTORY, TRAVEL_STYLES, build_system_prompt,
+    DEFAULT_MAX_HISTORY, TRAVEL_STYLES, VISION_MODELS, build_system_prompt,
 )
 
 st.set_page_config(
@@ -115,6 +116,8 @@ if "place_maps" not in st.session_state:
     st.session_state.place_maps = {}
 if "last_audio_hash" not in st.session_state:
     st.session_state.last_audio_hash = None
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
 
 # ── 사이드바 ──────────────────────────────────────────
 with st.sidebar:
@@ -192,6 +195,8 @@ if not st.session_state.messages:
 for i, message in enumerate(st.session_state.messages):
     avatar = "🧳" if message["role"] == "user" else "✈️"
     with st.chat_message(message["role"], avatar=avatar):
+        if message.get("image_b64"):
+            st.image(base64.b64decode(message["image_b64"]), width=320)
         st.markdown(message["content"])
     if show_map and message["role"] == "assistant" and i in st.session_state.place_maps:
         render_map(st.session_state.place_maps[i])
@@ -225,12 +230,40 @@ if audio_bytes:
         elif not transcribed or transcribed == "[BLANK_AUDIO]":
             st.warning("음성을 인식하지 못했습니다. 다시 시도해 주세요.", icon="🎤")
 
+# ── 이미지 첨부 ───────────────────────────────────────
+with st.expander("🖼️ 이미지 첨부", expanded=False):
+    uploaded_file = st.file_uploader(
+        "이미지를 첨부하면 다음 메시지와 함께 전송됩니다.",
+        type=["jpg", "jpeg", "png", "webp", "gif"],
+        key=f"img_uploader_{st.session_state.uploader_key}",
+        label_visibility="collapsed",
+    )
+    if uploaded_file:
+        st.image(uploaded_file, width=320)
+        st.caption(f"📎 {uploaded_file.name} — 다음 전송 시 함께 첨부됩니다.")
+        if model not in VISION_MODELS:
+            st.warning("현재 선택된 모델은 이미지를 지원하지 않습니다. gpt-4o-mini 이상을 선택해 주세요.", icon="⚠️")
+
 # ── 채팅 입력 ─────────────────────────────────────────
 text_prompt = st.chat_input("여행에 대해 무엇이든 물어보세요! 🌍")
 prompt = voice_prompt or text_prompt
 if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    # 이미지 인코딩
+    image_b64, image_type = None, None
+    if uploaded_file and model in VISION_MODELS:
+        image_b64 = base64.b64encode(uploaded_file.read()).decode("utf-8")
+        image_type = uploaded_file.type
+        st.session_state.uploader_key += 1  # 업로더 초기화
+
+    user_msg = {"role": "user", "content": prompt}
+    if image_b64:
+        user_msg["image_b64"] = image_b64
+        user_msg["image_type"] = image_type
+
+    st.session_state.messages.append(user_msg)
     with st.chat_message("user", avatar="🧳"):
+        if image_b64:
+            st.image(base64.b64decode(image_b64), width=320)
         st.markdown(prompt)
 
     system_prompt = build_system_prompt(

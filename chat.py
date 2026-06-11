@@ -37,16 +37,31 @@ def trim_history(messages: list, max_history: int) -> list:
     return messages
 
 
+def _build_api_messages(system_prompt: str, messages: list) -> list:
+    api_messages = [{"role": "system", "content": system_prompt}]
+    for m in messages:
+        if m.get("image_b64"):
+            api_messages.append({
+                "role": m["role"],
+                "content": [
+                    {"type": "text", "text": m["content"]},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:{m['image_type']};base64,{m['image_b64']}"
+                    }},
+                ],
+            })
+        else:
+            api_messages.append({"role": m["role"], "content": m["content"]})
+    return api_messages
+
+
 def stream_response(client, messages: list, model: str, temperature: float, system_prompt: str):
     placeholder = st.empty()
     placeholder.markdown("✈️ 여행 정보를 찾는 중...")
     try:
         stream = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                *[{"role": m["role"], "content": m["content"]} for m in messages],
-            ],
+            messages=_build_api_messages(system_prompt, messages),
             temperature=temperature,
             stream=True,
         )

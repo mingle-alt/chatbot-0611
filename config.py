@@ -13,6 +13,8 @@ DEFAULT_MAX_HISTORY = 20
 
 TRAVEL_STYLES = ["혼자", "커플", "가족여행", "친구"]
 
+VISION_MODELS = {"gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-5-mini", "gpt-5.4-mini", "gpt-5.4"}
+
 _SYSTEM_PROMPT_TEMPLATE = """당신은 10년 경력의 전문 여행 플래너이자 현지 가이드입니다.
 
 ## 역할과 전문성
