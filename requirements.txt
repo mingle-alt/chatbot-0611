@@ -3,3 +3,4 @@ openai
 folium
 streamlit-folium
 geopy
+audio-recorder-streamlit

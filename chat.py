@@ -1,3 +1,4 @@
+import io
 import time
 import json
 import streamlit as st
@@ -14,6 +15,20 @@ def get_client(api_key: str) -> OpenAI:
 @st.cache_resource
 def get_geocoder():
     return Nominatim(user_agent="travel-buddy-chatbot/1.0")
+
+
+def transcribe_audio(client, audio_bytes: bytes) -> str:
+    try:
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = "audio.wav"
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+        )
+        return transcript.text.strip()
+    except Exception as e:
+        st.error(f"음성 인식에 실패했습니다: {e}", icon="🎤")
+        return ""
 
 
 def trim_history(messages: list, max_history: int) -> list:

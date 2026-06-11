@@ -1,8 +1,10 @@
+import hashlib
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from datetime import date, timedelta
-from chat import get_client, trim_history, stream_response, extract_places, geocode_places
+from audio_recorder_streamlit import audio_recorder
+from chat import get_client, trim_history, stream_response, transcribe_audio, extract_places, geocode_places
 from config import (
     AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_TEMPERATURE,
     DEFAULT_MAX_HISTORY, TRAVEL_STYLES, build_system_prompt,
@@ -111,6 +113,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "place_maps" not in st.session_state:
     st.session_state.place_maps = {}
+if "last_audio_hash" not in st.session_state:
+    st.session_state.last_audio_hash = None
 
 # ── 사이드바 ──────────────────────────────────────────
 with st.sidebar:
@@ -192,8 +196,39 @@ for i, message in enumerate(st.session_state.messages):
     if show_map and message["role"] == "assistant" and i in st.session_state.place_maps:
         render_map(st.session_state.place_maps[i])
 
+# ── 음성 입력 ─────────────────────────────────────────
+voice_prompt = None
+mic_col, hint_col = st.columns([1, 11])
+with mic_col:
+    audio_bytes = audio_recorder(
+        text="",
+        recording_color="#e63946",
+        neutral_color="#0096c7",
+        icon_size="2x",
+        pause_threshold=2.0,
+    )
+with hint_col:
+    st.markdown(
+        '<p style="color:#888;font-size:0.82rem;margin-top:16px;">'
+        "🎤 마이크를 눌러 음성으로 질문하세요 (Whisper AI)</p>",
+        unsafe_allow_html=True,
+    )
+
+if audio_bytes:
+    audio_hash = hashlib.md5(audio_bytes).hexdigest()
+    if audio_hash != st.session_state.last_audio_hash:
+        st.session_state.last_audio_hash = audio_hash
+        with st.spinner("🎤 음성 인식 중..."):
+            transcribed = transcribe_audio(client, audio_bytes)
+        if transcribed and transcribed != "[BLANK_AUDIO]":
+            voice_prompt = transcribed
+        elif not transcribed or transcribed == "[BLANK_AUDIO]":
+            st.warning("음성을 인식하지 못했습니다. 다시 시도해 주세요.", icon="🎤")
+
 # ── 채팅 입력 ─────────────────────────────────────────
-if prompt := st.chat_input("여행에 대해 무엇이든 물어보세요! 🌍"):
+text_prompt = st.chat_input("여행에 대해 무엇이든 물어보세요! 🌍")
+prompt = voice_prompt or text_prompt
+if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user", avatar="🧳"):
         st.markdown(prompt)
