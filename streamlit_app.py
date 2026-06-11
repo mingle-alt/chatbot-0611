@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import streamlit as st
+import streamlit.components.v1 as components
 import folium
 from streamlit_folium import st_folium
 from datetime import date, timedelta
@@ -66,22 +67,61 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     border-color: #90e0ef;
 }
 
-/* 이미지 첨부 버튼 */
-div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] > div:nth-child(2) button {
-    border-radius: 50% !important;
-    width: 44px !important;
-    height: 44px !important;
-    padding: 0 !important;
-    font-size: 1.25rem !important;
-    background: transparent !important;
-    border: 2px solid #0096c7 !important;
-    color: #0096c7 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+/* 채팅 입력창 왼쪽 아이콘 공간 확보 */
+[data-testid="stChatInput"] textarea {
+    padding-left: 100px !important;
 }
-div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] > div:nth-child(2) button:hover {
-    background: #e8f6fd !important;
+
+/* 인라인 아이콘 바 (채팅 입력창 왼쪽에 배치 — JS가 top/left 계산) */
+#tcb-icons {
+    position: fixed;
+    z-index: 999;
+    display: none;
+    gap: 6px;
+    align-items: center;
+}
+.tcb-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 2px solid #0096c7;
+    background: rgba(255, 255, 255, 0.92);
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0096c7;
+    transition: background 0.15s, transform 0.1s;
+    backdrop-filter: blur(4px);
+    line-height: 1;
+    padding: 0;
+}
+.tcb-icon:hover {
+    background: #e8f6fd;
+    transform: scale(1.08);
+}
+
+/* JS 인젝터 iframe 숨김 (audio_recorder 제외) */
+[data-testid="stCustomComponentV1"][data-tcb-injector="true"] {
+    position: absolute !important;
+    width: 0 !important;
+    height: 0 !important;
+    opacity: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+
+/* 파일 업로더 숨김 — JS 갤러리 버튼으로 트리거 */
+[data-testid="stFileUploader"] {
+    position: absolute !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+[data-testid="stFileUploaderDropzoneInput"] {
+    pointer-events: all !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -136,8 +176,6 @@ if "last_audio_hash" not in st.session_state:
     st.session_state.last_audio_hash = None
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
-if "show_img_upload" not in st.session_state:
-    st.session_state.show_img_upload = False
 
 # ── 사이드바 ──────────────────────────────────────────
 with st.sidebar:
@@ -189,7 +227,7 @@ with st.sidebar:
     if st.button("🗑️ 대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.session_state.place_maps = {}
-        st.session_state.show_img_upload = False
+        st.session_state.uploader_key += 1
         st.rerun()
 
 if not api_key:
@@ -226,24 +264,18 @@ for i, message in enumerate(st.session_state.messages):
     if show_map and message["role"] == "assistant" and i in st.session_state.place_maps:
         render_map(st.session_state.place_maps[i])
 
-# ── 입력 툴바: 마이크 + 이미지 버튼 ──────────────────────
+# ── 음성·이미지 입력 ────────────────────────────────────
 voice_prompt = None
-mic_col, img_col, _ = st.columns([1.5, 1.5, 13])
 
-with mic_col:
-    audio_bytes = audio_recorder(
-        text="",
-        recording_color="#e63946",
-        neutral_color="#0096c7",
-        icon_size="2x",
-        pause_threshold=2.0,
-    )
+# audio_recorder: CSS가 채팅 입력창 🎤 아이콘 위에 투명 오버레이로 재배치
+audio_bytes = audio_recorder(
+    text="",
+    recording_color="#e63946",
+    neutral_color="#0096c7",
+    icon_size="2x",
+    pause_threshold=2.0,
+)
 
-with img_col:
-    if st.button("🖼️", help="이미지 첨부", use_container_width=True):
-        st.session_state.show_img_upload = not st.session_state.show_img_upload
-
-# 음성 처리
 if audio_bytes:
     audio_hash = hashlib.md5(audio_bytes).hexdigest()
     if audio_hash != st.session_state.last_audio_hash:
@@ -255,18 +287,109 @@ if audio_bytes:
         else:
             st.warning("음성을 인식하지 못했습니다. 다시 시도해 주세요.", icon="🎤")
 
-# 이미지 업로더 (버튼 토글 시 표시)
-uploaded_file = None
-if st.session_state.show_img_upload:
-    uploaded_file = st.file_uploader(
-        "JPG · PNG · WEBP · GIF",
-        type=["jpg", "jpeg", "png", "webp", "gif"],
-        key=f"img_uploader_{st.session_state.uploader_key}",
-    )
-    if uploaded_file:
-        st.image(uploaded_file, width=240)
+# 파일 업로더: CSS로 숨김, 🖼️ 아이콘 클릭 시 JS가 파일 입력을 트리거
+uploaded_file = st.file_uploader(
+    "",
+    type=["jpg", "jpeg", "png", "webp", "gif"],
+    key=f"img_uploader_{st.session_state.uploader_key}",
+    label_visibility="collapsed",
+)
+if uploaded_file:
+    col_p, col_x = st.columns([11, 1])
+    with col_p:
+        st.image(uploaded_file, width=200)
         if model not in VISION_MODELS:
             st.warning("Vision 미지원 모델입니다. gpt-4o-mini 이상을 선택해 주세요.", icon="⚠️")
+    with col_x:
+        if st.button("✕", key="remove_img", help="이미지 제거"):
+            st.session_state.uploader_key += 1
+            st.rerun()
+
+# ── 채팅 입력창 안 아이콘 바 ────────────────────────────
+# st.markdown은 <script>와 onclick을 보안상 제거하므로 HTML만 주입
+st.markdown("""
+<div id="tcb-icons">
+  <button class="tcb-icon" id="tcb-mic-icon" title="음성 입력 (Whisper AI)">🎤</button>
+  <button class="tcb-icon" id="tcb-gal-icon" title="이미지 첨부">🖼️</button>
+</div>
+""", unsafe_allow_html=True)
+
+# JS 인젝터: st.components.v1.html은 같은 origin iframe → window.parent 접근 가능
+components.html("""
+<script>
+(function() {
+    function init() {
+        try {
+            var doc = window.parent.document;
+
+            // 이 iframe 컨테이너를 마크하여 CSS에서 제외
+            if (window.frameElement) {
+                var myContainer = window.frameElement.closest('[data-testid="stCustomComponentV1"]');
+                if (myContainer) myContainer.setAttribute('data-tcb-injector', 'true');
+            }
+
+            var sb = doc.querySelector('[data-testid="stSidebar"]');
+            var icons = doc.getElementById('tcb-icons');
+            var chatInput = doc.querySelector('[data-testid="stChatInput"]');
+            if (!sb || !icons || !chatInput) return false;
+
+            // 아이콘 바를 채팅 입력창 내부 왼쪽에 배치
+            var ci = chatInput.getBoundingClientRect();
+            icons.style.left = (ci.left + 12) + 'px';
+            icons.style.top = (ci.top + (ci.height - 38) / 2) + 'px';
+            icons.style.display = 'flex';
+
+            // audio_recorder를 마이크 아이콘 위에 투명 오버레이로 배치
+            var micIcon = doc.getElementById('tcb-mic-icon');
+            doc.querySelectorAll('[data-testid="stCustomComponentV1"]').forEach(function(el) {
+                if (el.getAttribute('data-tcb-injector')) return;
+                el.style.setProperty('position', 'fixed', 'important');
+                el.style.setProperty('opacity', '0.01', 'important');
+                el.style.setProperty('z-index', '1001', 'important');
+                el.style.setProperty('overflow', 'hidden', 'important');
+                el.style.setProperty('pointer-events', 'all', 'important');
+                el.style.setProperty('width', '40px', 'important');
+                el.style.setProperty('height', '40px', 'important');
+                if (micIcon) {
+                    var r = micIcon.getBoundingClientRect();
+                    el.style.setProperty('left', r.left + 'px', 'important');
+                    el.style.setProperty('top', r.top + 'px', 'important');
+                    el.style.removeProperty('bottom');
+                }
+                var ifr = el.querySelector('iframe');
+                if (ifr) {
+                    ifr.style.setProperty('width', '100%', 'important');
+                    ifr.style.setProperty('height', '100%', 'important');
+                    ifr.style.setProperty('border', 'none', 'important');
+                }
+            });
+
+            // 갤러리 버튼 클릭 핸들러 (중복 등록 방지)
+            var galBtn = doc.getElementById('tcb-gal-icon');
+            if (galBtn && !galBtn._tcb) {
+                galBtn._tcb = true;
+                galBtn.addEventListener('click', function() {
+                    var fi = doc.querySelector('[data-testid="stFileUploader"] input[type="file"]')
+                            || doc.querySelector('input[type="file"]');
+                    if (fi) fi.click();
+                });
+            }
+
+            return true;
+        } catch(e) { return false; }
+    }
+
+    // 재시도 로직
+    var tries = 0;
+    function tryInit() {
+        tries++;
+        if (!init() && tries < 15) setTimeout(tryInit, 300);
+    }
+    setTimeout(tryInit, 200);
+    window.parent.addEventListener('resize', function() { setTimeout(init, 100); });
+})();
+</script>
+""", height=0)
 
 # ── 채팅 입력 ─────────────────────────────────────────
 text_prompt = st.chat_input("여행에 대해 무엇이든 물어보세요! 🌍")
