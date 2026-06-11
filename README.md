@@ -15,6 +15,12 @@ OpenAI GPT 모델을 사용하는 Streamlit 기반 AI 여행 플래너입니다.
 - **번호 마커** — 장소별 파란 원형 번호 마커 + 팝업 설명
 - **토글 on/off** — 사이드바에서 지도 표시 여부 선택 가능
 
+### 음성 입력
+- **마이크 버튼** — 브라우저에서 바로 녹음, 2초 침묵 시 자동 종료
+- **Whisper AI 전사** — OpenAI whisper-1 모델로 높은 정확도의 음성 인식 (한국어 포함 100개 언어 지원)
+- **자동 전송** — 전사 완료 즉시 채팅 메시지로 자동 전송
+- **중복 방지** — MD5 해시로 동일 녹음 재처리 차단
+
 ### AI 설정
 - **모델 선택** — gpt-4o-mini, gpt-4o, gpt-4.1-mini, gpt-5-mini 등 즉시 전환
 - **Temperature 조절** — 슬라이더로 응답 일관성/창의성 조절 (0.0~2.0)
@@ -25,8 +31,8 @@ OpenAI GPT 모델을 사용하는 Streamlit 기반 AI 여행 플래너입니다.
 ## 파일 구조
 
 ```
-├── streamlit_app.py   # UI, 지도 렌더링, 메인 진입점
-├── chat.py            # OpenAI 스트리밍, 장소 추출, 지오코딩
+├── streamlit_app.py   # UI, 음성 입력, 지도 렌더링, 메인 진입점
+├── chat.py            # OpenAI 스트리밍, Whisper 전사, 장소 추출, 지오코딩
 ├── config.py          # 모델 목록, 여행 시스템 프롬프트 템플릿
 └── requirements.txt
 ```
