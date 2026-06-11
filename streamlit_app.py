@@ -145,6 +145,18 @@ with st.sidebar:
     st.markdown("*AI 여행 플래너*")
     st.divider()
 
+    # API 키 (사이드바 상단)
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY", "")
+    except Exception:
+        api_key = ""
+    if not api_key:
+        api_key = st.text_input("OpenAI API Key", type="password")
+    if not api_key:
+        st.info("API 키를 입력해 주세요.", icon="🗝️")
+
+    st.divider()
+
     st.markdown("### 🗺️ 여행 정보")
     destination = st.text_input("여행지", placeholder="예: 도쿄, 파리, 발리...")
 
@@ -180,15 +192,7 @@ with st.sidebar:
         st.session_state.show_img_upload = False
         st.rerun()
 
-# ── API 키 ────────────────────────────────────────────
-try:
-    api_key = st.secrets.get("OPENAI_API_KEY", "")
-except Exception:
-    api_key = ""
 if not api_key:
-    api_key = st.text_input("OpenAI API Key", type="password")
-if not api_key:
-    st.info("OpenAI API 키를 입력해 주세요.", icon="🗝️")
     st.stop()
 
 client = get_client(api_key)
