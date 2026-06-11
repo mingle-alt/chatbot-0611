@@ -1,38 +1,158 @@
 import streamlit as st
-from chat import get_client, trim_history, stream_response
-from config import AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_HISTORY
-
-st.title("💬 Chatbot")
-st.write(
-    "GPT 기반 챗봇입니다. "
-    "사용하려면 [OpenAI API 키](https://platform.openai.com/account/api-keys)가 필요합니다."
+import folium
+from streamlit_folium import st_folium
+from datetime import date, timedelta
+from chat import get_client, trim_history, stream_response, extract_places, geocode_places
+from config import (
+    AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_TEMPERATURE,
+    DEFAULT_MAX_HISTORY, TRAVEL_STYLES, build_system_prompt,
 )
 
+st.set_page_config(
+    page_title="Travel Buddy",
+    page_icon="✈️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("""
+<style>
+/* 앱 배경 */
+.stApp {
+    background: linear-gradient(160deg, #e8f6fd 0%, #f0faf4 55%, #fdf8ec 100%);
+}
+
+/* 사이드바 배경 */
+section[data-testid="stSidebar"] > div:first-child {
+    background: linear-gradient(180deg, #023e8a 0%, #0077b6 50%, #0096c7 100%);
+}
+
+/* 사이드바 텍스트 */
+section[data-testid="stSidebar"] .stMarkdown p,
+section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] small,
+section[data-testid="stSidebar"] .stCaption p {
+    color: rgba(255, 255, 255, 0.92) !important;
+}
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+/* 사이드바 버튼 */
+section[data-testid="stSidebar"] .stButton > button {
+    background: rgba(255, 255, 255, 0.15) !important;
+    color: white !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    border-radius: 8px;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(255, 255, 255, 0.28) !important;
+}
+
+/* 채팅 메시지 */
+[data-testid="stChatMessage"] {
+    border-radius: 14px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+}
+
+/* 채팅 입력창 */
+[data-testid="stChatInput"] {
+    border-color: #90e0ef;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+def render_map(places: list[dict]):
+    if not places:
+        return
+    lats = [p["lat"] for p in places]
+    lons = [p["lon"] for p in places]
+    center = [sum(lats) / len(lats), sum(lons) / len(lons)]
+
+    m = folium.Map(location=center, zoom_start=13, tiles="CartoDB positron")
+
+    for idx, place in enumerate(places, 1):
+        folium.Marker(
+            location=[place["lat"], place["lon"]],
+            popup=folium.Popup(
+                f"<b>{place['name']}</b><br><small>{place['description']}</small>",
+                max_width=220,
+            ),
+            tooltip=f"{idx}. {place['name']}",
+            icon=folium.DivIcon(
+                html=(
+                    f'<div style="background:#0096c7;color:white;border-radius:50%;'
+                    f'width:28px;height:28px;display:flex;align-items:center;'
+                    f'justify-content:center;font-weight:bold;font-size:13px;'
+                    f'border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);">'
+                    f'{idx}</div>'
+                ),
+                icon_size=(28, 28),
+                icon_anchor=(14, 14),
+            ),
+        ).add_to(m)
+
+    if len(places) > 1:
+        m.fit_bounds(
+            [[min(lats), min(lons)], [max(lats), max(lons)]],
+            padding=[40, 40],
+        )
+
+    with st.expander("🗺️ 장소 지도", expanded=True):
+        st_folium(m, height=400, use_container_width=True, returned_objects=[])
+
+
+# 세션 상태 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "place_maps" not in st.session_state:
+    st.session_state.place_maps = {}
 
+# ── 사이드바 ──────────────────────────────────────────
 with st.sidebar:
-    st.header("설정")
+    st.markdown("## ✈️ Travel Buddy")
+    st.markdown("*AI 여행 플래너*")
+    st.divider()
 
-    # 모델 선택 (#10)
-    model = st.selectbox("모델", AVAILABLE_MODELS, index=AVAILABLE_MODELS.index(DEFAULT_MODEL))
+    st.markdown("### 🗺️ 여행 정보")
+    destination = st.text_input("여행지", placeholder="예: 도쿄, 파리, 발리...")
 
-    # temperature 조절 (#12)
-    temperature = st.slider("Temperature", min_value=0.0, max_value=2.0, value=DEFAULT_TEMPERATURE, step=0.1,
-                            help="낮을수록 일관된 답변, 높을수록 창의적인 답변")
+    today = date.today()
+    date_range = st.date_input(
+        "여행 기간",
+        value=(today + timedelta(days=30), today + timedelta(days=37)),
+        min_value=today,
+        format="YYYY/MM/DD",
+    )
 
-    # 히스토리 길이 조절 (#10)
-    max_history = st.slider("최대 대화 턴", min_value=5, max_value=50, value=DEFAULT_MAX_HISTORY, step=5,
-                            help="이전 대화를 몇 턴까지 기억할지 설정합니다")
+    budget = st.slider("예산 범위 (만원)", min_value=10, max_value=500, value=(50, 150), step=10)
+    travel_style = st.selectbox("여행 스타일", TRAVEL_STYLES)
 
     st.divider()
+
+    st.markdown("### ⚙️ AI 설정")
+    model = st.selectbox("모델", AVAILABLE_MODELS, index=AVAILABLE_MODELS.index(DEFAULT_MODEL))
+    temperature = st.slider(
+        "Temperature", 0.0, 2.0, DEFAULT_TEMPERATURE, 0.1,
+        help="낮을수록 일관된 답변, 높을수록 창의적인 답변",
+    )
+    max_history = st.slider("최대 대화 턴", 5, 50, DEFAULT_MAX_HISTORY, 5)
+    show_map = st.toggle("🗺️ 지도 자동 표시", value=True)
+
+    st.divider()
+
     turn_count = len(st.session_state.messages) // 2
-    st.caption(f"현재 대화: {turn_count}턴 / 최대 {max_history}턴")
+    st.caption(f"대화: {turn_count}턴 / 최대 {max_history}턴")
     if st.button("🗑️ 대화 초기화", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.place_maps = {}
         st.rerun()
 
-# API 키: secrets.toml 우선, 없으면 UI 입력 (#1)
+# ── API 키 ────────────────────────────────────────────
 try:
     api_key = st.secrets.get("OPENAI_API_KEY", "")
 except Exception:
@@ -43,25 +163,64 @@ if not api_key:
     st.info("OpenAI API 키를 입력해 주세요.", icon="🗝️")
     st.stop()
 
-# 클라이언트 캐싱 (#2)
 client = get_client(api_key)
-
 st.session_state.messages = trim_history(st.session_state.messages, max_history)
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# ── 헤더 ─────────────────────────────────────────────
+dest_label = f" — {destination}" if destination else ""
+st.markdown(
+    f'<h1 style="color:#023e8a;margin-bottom:2px;">✈️ Travel Buddy</h1>'
+    f'<p style="color:#0096c7;margin-top:0;margin-bottom:16px;border-bottom:2px solid #90e0ef;'
+    f'padding-bottom:10px;">AI 여행 플래너{dest_label}</p>',
+    unsafe_allow_html=True,
+)
 
-if prompt := st.chat_input("메시지를 입력하세요..."):
+# 환영 메시지
+if not st.session_state.messages:
+    st.info(
+        "안녕하세요! 여행 플래너 Travel Buddy입니다. ✈️\n\n"
+        "사이드바에서 여행 정보를 입력하거나 바로 질문해 보세요!\n\n"
+        "**예시:** 도쿄 3박 4일 일정 짜줘 · 파리 맛집 추천 · 발리 숙소 어디가 좋아?",
+        icon="🌍",
+    )
+
+# ── 채팅 히스토리 ─────────────────────────────────────
+for i, message in enumerate(st.session_state.messages):
+    avatar = "🧳" if message["role"] == "user" else "✈️"
+    with st.chat_message(message["role"], avatar=avatar):
+        st.markdown(message["content"])
+    if show_map and message["role"] == "assistant" and i in st.session_state.place_maps:
+        render_map(st.session_state.place_maps[i])
+
+# ── 채팅 입력 ─────────────────────────────────────────
+if prompt := st.chat_input("여행에 대해 무엇이든 물어보세요! 🌍"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="🧳"):
         st.markdown(prompt)
 
-    with st.chat_message("assistant"):
-        response, error = stream_response(client, st.session_state.messages, model, temperature)
+    system_prompt = build_system_prompt(
+        destination=destination,
+        date_range=date_range if isinstance(date_range, (list, tuple)) and len(date_range) >= 1 else None,
+        budget=budget,
+        travel_style=travel_style,
+    )
+
+    with st.chat_message("assistant", avatar="✈️"):
+        response, error = stream_response(
+            client, st.session_state.messages, model, temperature, system_prompt
+        )
 
     if error:
         st.error(error[0], icon=error[1])
         st.session_state.messages.pop()
     else:
+        new_msg_index = len(st.session_state.messages)
         st.session_state.messages.append({"role": "assistant", "content": response})
+
+        if show_map:
+            with st.spinner("🗺️ 장소를 지도에서 찾는 중..."):
+                places_raw = extract_places(client, response)
+                geocoded = geocode_places(places_raw, destination)
+            if geocoded:
+                st.session_state.place_maps[new_msg_index] = geocoded
+                st.rerun()
