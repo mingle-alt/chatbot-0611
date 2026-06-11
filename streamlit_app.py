@@ -65,6 +65,24 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 [data-testid="stChatInput"] {
     border-color: #90e0ef;
 }
+
+/* 이미지 첨부 버튼 */
+div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] > div:nth-child(2) button {
+    border-radius: 50% !important;
+    width: 44px !important;
+    height: 44px !important;
+    padding: 0 !important;
+    font-size: 1.25rem !important;
+    background: transparent !important;
+    border: 2px solid #0096c7 !important;
+    color: #0096c7 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+div[data-testid="stMainBlockContainer"] div[data-testid="stHorizontalBlock"] > div:nth-child(2) button:hover {
+    background: #e8f6fd !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -118,6 +136,8 @@ if "last_audio_hash" not in st.session_state:
     st.session_state.last_audio_hash = None
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
+if "show_img_upload" not in st.session_state:
+    st.session_state.show_img_upload = False
 
 # ── 사이드바 ──────────────────────────────────────────
 with st.sidebar:
@@ -157,6 +177,7 @@ with st.sidebar:
     if st.button("🗑️ 대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.session_state.place_maps = {}
+        st.session_state.show_img_upload = False
         st.rerun()
 
 # ── API 키 ────────────────────────────────────────────
@@ -201,9 +222,10 @@ for i, message in enumerate(st.session_state.messages):
     if show_map and message["role"] == "assistant" and i in st.session_state.place_maps:
         render_map(st.session_state.place_maps[i])
 
-# ── 음성 입력 ─────────────────────────────────────────
+# ── 입력 툴바: 마이크 + 이미지 버튼 ──────────────────────
 voice_prompt = None
-mic_col, hint_col = st.columns([1, 11])
+mic_col, img_col, _ = st.columns([1.5, 1.5, 13])
+
 with mic_col:
     audio_bytes = audio_recorder(
         text="",
@@ -212,13 +234,12 @@ with mic_col:
         icon_size="2x",
         pause_threshold=2.0,
     )
-with hint_col:
-    st.markdown(
-        '<p style="color:#888;font-size:0.82rem;margin-top:16px;">'
-        "🎤 마이크를 눌러 음성으로 질문하세요 (Whisper AI)</p>",
-        unsafe_allow_html=True,
-    )
 
+with img_col:
+    if st.button("🖼️", help="이미지 첨부", use_container_width=True):
+        st.session_state.show_img_upload = not st.session_state.show_img_upload
+
+# 음성 처리
 if audio_bytes:
     audio_hash = hashlib.md5(audio_bytes).hexdigest()
     if audio_hash != st.session_state.last_audio_hash:
@@ -227,22 +248,21 @@ if audio_bytes:
             transcribed = transcribe_audio(client, audio_bytes)
         if transcribed and transcribed != "[BLANK_AUDIO]":
             voice_prompt = transcribed
-        elif not transcribed or transcribed == "[BLANK_AUDIO]":
+        else:
             st.warning("음성을 인식하지 못했습니다. 다시 시도해 주세요.", icon="🎤")
 
-# ── 이미지 첨부 ───────────────────────────────────────
-with st.expander("🖼️ 이미지 첨부", expanded=False):
+# 이미지 업로더 (버튼 토글 시 표시)
+uploaded_file = None
+if st.session_state.show_img_upload:
     uploaded_file = st.file_uploader(
-        "이미지를 첨부하면 다음 메시지와 함께 전송됩니다.",
+        "JPG · PNG · WEBP · GIF",
         type=["jpg", "jpeg", "png", "webp", "gif"],
         key=f"img_uploader_{st.session_state.uploader_key}",
-        label_visibility="collapsed",
     )
     if uploaded_file:
-        st.image(uploaded_file, width=320)
-        st.caption(f"📎 {uploaded_file.name} — 다음 전송 시 함께 첨부됩니다.")
+        st.image(uploaded_file, width=240)
         if model not in VISION_MODELS:
-            st.warning("현재 선택된 모델은 이미지를 지원하지 않습니다. gpt-4o-mini 이상을 선택해 주세요.", icon="⚠️")
+            st.warning("Vision 미지원 모델입니다. gpt-4o-mini 이상을 선택해 주세요.", icon="⚠️")
 
 # ── 채팅 입력 ─────────────────────────────────────────
 text_prompt = st.chat_input("여행에 대해 무엇이든 물어보세요! 🌍")
